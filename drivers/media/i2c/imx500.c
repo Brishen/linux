@@ -240,7 +240,8 @@ enum pad_types { IMAGE_PAD, METADATA_PAD, NUM_PADS };
 #define V4L2_CID_USER_IMX500_INFERENCE_WINDOW (V4L2_CID_USER_IMX500_BASE + 0)
 #define V4L2_CID_USER_IMX500_NETWORK_FW_FD (V4L2_CID_USER_IMX500_BASE + 1)
 #define V4L2_CID_USER_GET_IMX500_DEVICE_ID (V4L2_CID_USER_IMX500_BASE + 2)
-
+#define V4L2_CID_USER_IMX500_RELOAD_NETWORK_FD \
+        (V4L2_CID_USER_IMX500_BASE + 3)
 #define ONE_MIB (1024 * 1024)
 
 /* regulator supplies */
@@ -2009,6 +2010,35 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 		       sizeof(struct v4l2_rect));
 		ret = imx500_set_inference_window(imx500);
 		break;
+	case V4L2_CID_USER_IMX500_RELOAD_NETWORK_FD: {
+        int was_streaming = imx500->streaming;
+
+        /* Grab new blob exactly the same way as the first-boot path */
+        ret = imx500_load_fw_from_fd(imx500, ctrl->val);
+        if (ret)
+                return ret;
+
+        /* 1. stop sensor if it’s live */
+        if (was_streaming)
+                imx500_stop_streaming(imx500);
+
+        /* 2. run UPDATE */
+        ret = imx500_state_transition(imx500,
+                        imx500->fw_network,
+                        imx500->fw_network_size,
+                        TYPE_NW_WEIGHTS,
+                        /*update=*/true);
+        if (ret)
+                goto restart_fail;
+
+        /* 3. re-enable DNN and streaming if needed */
+        imx500->network_written = true;   /* we just pushed it */
+        if (was_streaming)
+                ret = imx500_start_streaming(imx500);
+		break;
+	restart_fail:
+        return ret;
+		
 	default:
 		dev_info(&client->dev,
 			 "ctrl(id:0x%x,val:0x%x) is not handled\n", ctrl->id,
@@ -2964,6 +2994,20 @@ static const struct v4l2_ctrl_config cam_get_device_id = {
 	.def		= 0,
 };
 
+/* Control to load new ML models*/
+static const struct v4l2_ctrl_config reload_nw_fd = {
+        .name   = "IMX500 Reload Network File FD",
+        .id     = V4L2_CID_USER_IMX500_RELOAD_NETWORK_FD,
+        .ops    = &imx500_ctrl_ops,
+        .type   = V4L2_CTRL_TYPE_INTEGER,
+        .flags  = V4L2_CTRL_FLAG_EXECUTE_ON_WRITE |
+                  V4L2_CTRL_FLAG_WRITE_ONLY,
+        .min    = -1,
+        .max    = S32_MAX,
+        .step   = 1,
+        .def    = -1,
+};
+
 /* Initialize control handlers */
 static int imx500_init_controls(struct imx500 *imx500)
 {
@@ -3027,6 +3071,8 @@ static int imx500_init_controls(struct imx500 *imx500)
 	v4l2_ctrl_new_custom(ctrl_hdlr, &inf_window_ctrl, NULL);
 	imx500->network_fw_ctrl =
 		v4l2_ctrl_new_custom(ctrl_hdlr, &network_fw_fd, NULL);
+	imx500->reload_nw_fd =
+		v4l2_ctrl_new_custom(ctrl_hdlr, &reload_nw_fd, NULL);
 	imx500->device_id =
 		v4l2_ctrl_new_custom(ctrl_hdlr, &cam_get_device_id, NULL);
 
