@@ -2067,30 +2067,34 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_USER_IMX500_RELOAD_NETWORK_FD: {
         int was_streaming = imx500->streaming;
 
-        /* Grab new blob exactly the same way as the first-boot path */
         ret = imx500_load_fw_from_fd(imx500, ctrl->val);
+        ctrl->val = -1;                        /* FD consumed early */
         if (ret)
-                return ret;
+                break;
 
-        /* 1. stop sensor if it’s live */
+        __v4l2_ctrl_grab(imx500->reload_nw_fd, true);
+
         if (was_streaming)
                 imx500_stop_streaming(imx500);
 
-        /* 2. run UPDATE */
         ret = imx500_state_transition(imx500,
-                        imx500->fw_network,
-                        imx500->fw_network_size,
-                        TYPE_NW_WEIGHTS,
-                        /*update=*/true);
+                                      imx500->fw_network,
+                                      imx500->fw_network_size,
+                                      TYPE_NW_WEIGHTS,
+                                      true);
         if (ret)
-                goto restart_fail;
+                goto reload_done;
 
-        /* 3. re-enable DNN and streaming if needed */
-        imx500->network_written = true;   /* we just pushed it */
+        imx500->network_written = true;
+
         if (was_streaming)
                 ret = imx500_start_streaming(imx500);
-	restart_fail:
-        return ret;
+
+		reload_done:
+				__v4l2_ctrl_grab(imx500->reload_nw_fd, false);
+				break;
+		}
+
 
 	default:
 		dev_info(&client->dev,
