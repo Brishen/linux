@@ -1892,6 +1892,60 @@ static int imx500_clear_weights(struct imx500 *imx500)
 	return 0;
 }
 
+/* Load a network-firmware blob from a user-supplied FD.
+ * Returns 0 on success or a negative errno.
+ */
+static int imx500_load_fw_from_fd(struct imx500 *imx500, int fd)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
+	int ret;
+
+	if (fd < 0)
+		return -EINVAL;
+
+	/* Throw away any previous blob first. */
+	imx500_clear_fw_network(imx500);
+
+	/* kernel_read_file_from_fd() allocates a buffer and
+	 * hands ownership to the caller (must vfree() later). */
+	ret = kernel_read_file_from_fd(fd, 0,
+				       (void **)&imx500->fw_network,
+				       INT_MAX,
+				       &imx500->fw_network_size,
+				       /* reading firmware */ 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s: read failed (%d)\n",
+			__func__, ret);
+		goto err_clear;
+	}
+
+	if (ret != imx500->fw_network_size) {
+		dev_err(&client->dev,
+			"%s: size mismatch (%d vs %zu)\n",
+			__func__, ret, imx500->fw_network_size);
+		ret = -EIO;
+		goto err_clear;
+	}
+
+	/* Quick sanity-check so we die early on garbage blobs. */
+	if (!imx500_valid_fw_bytes(imx500->fw_network,
+				   imx500->fw_network_size)) {
+		dev_err(&client->dev, "%s: invalid FW header/footer\n",
+			__func__);
+		ret = -EINVAL;
+		goto err_clear;
+	}
+
+	/* Pre-compute how many metadata lines to expect. */
+	imx500_calc_inference_lines(imx500);
+	return 0;
+
+err_clear:
+	imx500_clear_fw_network(imx500);
+	return ret;
+}
+
+
 static void imx500_clear_fw_network(struct imx500 *imx500)
 {
 	/* Remove any previous firmware blob. */
@@ -2035,10 +2089,9 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
         imx500->network_written = true;   /* we just pushed it */
         if (was_streaming)
                 ret = imx500_start_streaming(imx500);
-		break;
 	restart_fail:
         return ret;
-		
+
 	default:
 		dev_info(&client->dev,
 			 "ctrl(id:0x%x,val:0x%x) is not handled\n", ctrl->id,
