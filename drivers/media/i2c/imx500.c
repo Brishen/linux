@@ -1367,6 +1367,7 @@ struct imx500 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *network_fw_ctrl;
+	struct v4l2_ctrl *reload_nw_fd;
 	struct v4l2_ctrl *device_id;
 
 	struct v4l2_rect inference_window;
@@ -1957,8 +1958,11 @@ err_clear:
 	return ret;
 }
 
-
-
+static int imx500_start_streaming(struct imx500 *imx500);
+static void imx500_stop_streaming(struct imx500 *imx500);
+static int imx500_state_transition(struct imx500 *imx500, const u8 *fw,
+				   size_t fw_size, enum imx500_image_type type,
+				   bool update);
 
 static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 {
@@ -2092,10 +2096,10 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
         if (was_streaming)
                 ret = imx500_start_streaming(imx500);
 
-		reload_done:
-				__v4l2_ctrl_grab(imx500->reload_nw_fd, false);
-				break;
-		}
+        reload_done:
+                __v4l2_ctrl_grab(imx500->reload_nw_fd, false);
+                break;
+        }
 
 
 	default:
