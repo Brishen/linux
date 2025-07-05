@@ -1892,6 +1892,18 @@ static int imx500_clear_weights(struct imx500 *imx500)
 	return 0;
 }
 
+static void imx500_clear_fw_network(struct imx500 *imx500)
+{
+	/* Remove any previous firmware blob. */
+	if (imx500->fw_network)
+		vfree(imx500->fw_network);
+
+	imx500->fw_network = NULL;
+	imx500->network_written = false;
+	imx500->fw_progress = 0;
+	v4l2_ctrl_activate(imx500->device_id, false);
+}
+
 /* Load a network-firmware blob from a user-supplied FD.
  * Returns 0 on success or a negative errno.
  */
@@ -1946,17 +1958,7 @@ err_clear:
 }
 
 
-static void imx500_clear_fw_network(struct imx500 *imx500)
-{
-	/* Remove any previous firmware blob. */
-	if (imx500->fw_network)
-		vfree(imx500->fw_network);
 
-	imx500->fw_network = NULL;
-	imx500->network_written = false;
-	imx500->fw_progress = 0;
-	v4l2_ctrl_activate(imx500->device_id, false);
-}
 
 static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 {
